@@ -5,6 +5,8 @@
 #include <vector>
 #include <unordered_map>
 
+#include <file_logger.h>
+
 namespace faster_lio {
 
 // squared distance of two pcl points
@@ -42,26 +44,26 @@ public:
 
     struct DistPoint;
 
-    IVoxNode() : probability(0) {}
+    IVoxNode(const PointT& c, int P = 0) : center(c), probability(P) {}
     //IVoxNode(const PointT& center, const float& side_length) {}
 
     void InsertPoint(const PointT& pt);
 
-    inline bool Empty() const;
+    // inline bool Empty() const;
 
-    inline std::size_t Size() const;
+    //inline std::size_t Size() const;
 
     // inline PointT GetPoint(const std::size_t idx) const;
 
-    int KNNPointByCondition(std::vector<DistPoint>& dis_points, const PointT& point, const int& K,
-                            const double& max_range);
+    int KNNPointByCondition(std::vector<DistPoint>& dis_points, const PointT& point, const int& K);
 
-    void addP() {probability = (probability >= 20) ? 20 : (probability+1);}
-    void subP() {probability = (probability <= 0) ? 0 : (probability-1);}
+    void addP(int max, int v) {probability = (probability >= max) ? max : (probability+v);}
+    void subP(int v) {probability = (probability <= 0) ? 0 : (probability-v);}
     int getP() const {return probability;}
 
 private:
-    std::list<PointT> points_;
+    std::vector<PointT> points_;
+    PointT center;
     int probability;
 };
 
@@ -82,43 +84,67 @@ struct IVoxNode<PointT, dim>::DistPoint {
 
 template <typename PointT, int dim>
 void IVoxNode<PointT, dim>::InsertPoint(const PointT& pt) {
-    points_.emplace_back(pt);
-    // 只维护最新的 50 个点云
-    if (points_.size() > 50) {
-        points_.pop_front();
+    // 策略 1
+    // 只维护最新的两个点
+    // points_.emplace_back(pt);
+    // if (points_.size() > 2) {
+    //     points_.pop_front();
+    // }
+
+    // 策略 2
+    // 只维护最新的一个点
+    // while (points_.size()!=0) {
+    //     points_.pop_back();
+    // }
+    // points_.emplace_back(pt);
+
+    // 策略 3
+    // 只维护最靠近中心一个点，且从此不再更新
+    if (points_.size()==0) {
+        points_.emplace_back(pt);
+    }
+    else if (points_.size()>1) {
+        neal::logger(neal::LOG_WARN, "why more than one point???");
+        return;
+    }
+    else {
+        double d1 = distance2(pt, center);
+        double d2 = distance2(points_[0], center);
+        if (d1 < d2) {
+            points_.pop_back();
+            points_.emplace_back(pt);
+        }
     }
     return;
 }
 
-template <typename PointT, int dim>
-bool IVoxNode<PointT, dim>::Empty() const {
-    return points_.empty();
-}
+// template <typename PointT, int dim>
+// bool IVoxNode<PointT, dim>::Empty() const {
+//     return points_.empty();
+// }
+
+// template <typename PointT, int dim>
+// std::size_t IVoxNode<PointT, dim>::Size() const {
+//     return points_.size();
+// }
 
 template <typename PointT, int dim>
-std::size_t IVoxNode<PointT, dim>::Size() const {
-    return points_.size();
-}
-
-template <typename PointT, int dim>
-int IVoxNode<PointT, dim>::KNNPointByCondition(std::vector<DistPoint>& dis_points, const PointT& point, const int& K,
-                                               const double& max_range) {
+int IVoxNode<PointT, dim>::KNNPointByCondition(std::vector<DistPoint>& dis_points, const PointT& point, const int& K) {
     // 其它体素内找到的近邻点个数
     std::size_t old_size = dis_points.size();
 
     for (const auto& pt : points_) {
         double d = distance2(pt, point);
-        if (d < max_range * max_range) {  // < 0.4*0.4
-            dis_points.template emplace_back(DistPoint(d, pt));
-        }
+        // if (d < max_range * max_range) {  // < 0.4*0.4
+        dis_points.template emplace_back(DistPoint(d, pt));
     }
 
     // sort by distance
-    if (old_size + K >= dis_points.size()) {
-    } else {
-        std::nth_element(dis_points.begin() + old_size, dis_points.begin() + old_size + K - 1, dis_points.end());
-        dis_points.resize(old_size + K);
-    }
+    // if (old_size + K >= dis_points.size()) {
+    // } else {
+    //     std::nth_element(dis_points.begin() + old_size, dis_points.begin() + old_size + K - 1, dis_points.end());
+    //     dis_points.resize(old_size + K);
+    // }
 
     return dis_points.size();
 }

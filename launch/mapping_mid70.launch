@@ -9,7 +9,7 @@
 	<node pkg="voxel_lio" type="lio_node" name="laserMapping" output="screen" /> 
 
 	<group if="$(arg rviz)">
-	<node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz" args="-d /home/neal/projects/lio_ros/src/lio/rviz_cfg/loam_livox.rviz" />
+	<node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz" args="-d /home/neal/projects/voxel_lio/src/lio/rviz_cfg/loam_livox.rviz" />
 	</group>
 
 </launch>

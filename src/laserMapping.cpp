@@ -326,12 +326,12 @@ void map_incremental(float resolution) {
             // 保存新的体素信息
             hit.emplace(key);
         }
-        double dx = 0.1;
+        double dx = resolution/2.0;
         double dy = point_body.y * dx / point_body.x;
         double dz = point_body.z * dx / point_body.x;
-        double disx = point_body.x-dx;
-        double disy = point_body.y-dy;
-        double disz = point_body.z-dz;
+        double disx = point_body.x-dx * 2;
+        double disy = point_body.y-dy * 2;
+        double disz = point_body.z-dz * 2;
         while (disx > 0.5) {
             // 从 LiDar 系转换到世界坐标系
             disx -= dx;
@@ -356,26 +356,26 @@ void map_incremental(float resolution) {
         // 判断是否需要加入地图
         PointType &point_world = feats_down_world->points[i];
         // Nearest_Points 在 iekf 中更新
-        if (!Nearest_Points[i].empty()) {
-            // 如果与最近邻距离较远则添加
-            const PointVector &points_near = Nearest_Points[i];
-            if (fabs(points_near[0].x - point_world.x) > 0.5 * filter_size_map_min ||
-                fabs(points_near[0].y - point_world.y) > 0.5 * filter_size_map_min ||
-                fabs(points_near[0].z - point_world.z) > 0.5 * filter_size_map_min) {
-                PointToAdd.emplace_back(point_world);
-                return;
-            }
-        }
+        // if (!Nearest_Points[i].empty()) {
+        //     // 如果与最近邻距离较远则添加
+        //     const PointVector &points_near = Nearest_Points[i];
+        //     if (fabs(points_near[0].x - point_world.x) > 0.5 * filter_size_map_min ||
+        //         fabs(points_near[0].y - point_world.y) > 0.5 * filter_size_map_min ||
+        //         fabs(points_near[0].z - point_world.z) > 0.5 * filter_size_map_min) {
+        //         PointToAdd.emplace_back(point_world);
+        //         return;
+        //     }
+        // }
         // 如果没有最近邻
-        else {
-            PointToAdd.emplace_back(point_world);
-            return;
-        }
+        // else {
+        PointToAdd.emplace_back(point_world);
+        //     return;
+        // }
     });
-    // 更新概率
-    ivox_->updateP(pass, hit);
     // 更新地图
     ivox_->AddPoints(PointToAdd);
+    // 更新概率
+    ivox_->updateP(pass, hit);
 }
 
 void publish_frame_world(const ros::Publisher & pubLaserCloudFull) {
@@ -411,20 +411,22 @@ void publish_frame_world(const ros::Publisher & pubLaserCloudFull) {
     }
 }
 
-void voxelFilter(const M3D& R_W_G) {
+void voxelFilter(const M3D& R_W_G, int threshold) {
     int size = pcl_wait_save->points.size();
+    neal::logger(neal::LOG_INFO, "pcl wait save size: " + std::to_string(size));
     pcl_wait_save_out->resize(size);
     int effct_feat_num = 0;
     for (int i = 0; i < size; i++) {
         V3F voxel(pcl_wait_save->points[i].x, pcl_wait_save->points[i].y, pcl_wait_save->points[i].z);
         // 获取概率
         int probability = ivox_->getP(voxel);
-        if (probability >= 10) {
+        if (probability >= threshold) {
             // 保存新的体素信息
-            pcl_wait_save_out->points[effct_feat_num] = feats_down_body->points[i];
+            pcl_wait_save_out->points[effct_feat_num] = pcl_wait_save->points[i];
             effct_feat_num++;
         }
     }
+    pcl_wait_save_out->resize(effct_feat_num);
 }
 
 // 在 publish_odometry 和 publish_path 中调用
@@ -571,6 +573,7 @@ void h_share_model(state_ikfom &st, esekfom::dyn_share_datastruct<double> &ekfom
             effct_feat_num ++;  // 有效特征点数 ++
         }
     }
+    neal::logger(neal::LOG_INFO, "Effective Points: " + std::to_string(effct_feat_num));
 
     if (effct_feat_num < 1) {
         ekfom_data.valid = false;
@@ -659,8 +662,13 @@ int main(int argc, char** argv) {
     nh.param<std::vector<double>>("mapping/extrinsic_T",extrinT,std::vector<double>());
     nh.param<std::vector<double>>("mapping/extrinsic_R",extrinR,std::vector<double>());
     
-    nh.param<float>("ivox_grid_resolution", ivox_options_.resolution_, 0.2);  // 体素大小
-    nh.param<int>("ivox_nearby_type", ivox_nearby_type, 6);
+    nh.param<float>("ivox/grid_resolution", ivox_options_.resolution_, 0.05);  // 体素大小
+    nh.param<int>("ivox/nearby_type", ivox_nearby_type, -1);
+    nh.param<int>("ivox/P_max", ivox_options_.P_max, 100);
+    nh.param<int>("ivox/P_threshold", ivox_options_.P_threshold, 50);
+    nh.param<int>("ivox/add_value", ivox_options_.add_value, 5);
+    nh.param<int>("ivox/sub_value", ivox_options_.sub_value, 1);
+
 
     /* test*/
     nh.param<int>("preprocess/reflect_thresh", param_reflect, 10);
@@ -678,9 +686,11 @@ int main(int argc, char** argv) {
         ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY18;
     } else if (ivox_nearby_type == 26) {
         ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY26;
+    } else if (ivox_nearby_type == -1) {  // random 是指：从 0.3m 范围内寻找最近邻
+        ivox_options_.nearby_type_ = IVoxType::NearbyType::RANDOM;
     } else {
         neal::logger(neal::LOG_INFO, "unknown nearby type.");
-        ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY18;
+        ivox_options_.nearby_type_ = IVoxType::NearbyType::RANDOM;
     }
     ivox_ = std::make_shared<IVoxType>(ivox_options_);
 
@@ -756,7 +766,7 @@ int main(int argc, char** argv) {
 
         // 第一次 while 循环，进行初始化
         if (flg_first_scan) {
-            ivox_->AddPoints(feats_undistort->points);
+            ivox_->AddPoints(feats_undistort->points, ivox_options_.P_threshold);
             first_lidar_time = measures.lidar_beg_time;
             flg_first_scan = false;
             continue;
@@ -825,7 +835,7 @@ int main(int argc, char** argv) {
         std::string all_points_dir(std::string(std::string(ROOT_DIR) + "PCD/") + file_name);
         pcl::PLYWriter writer;
         std::cout << "current scan saved to /PCD/" << file_name << std::endl;
-        voxelFilter(p_imu->get_R_W_G());
+        voxelFilter(p_imu->get_R_W_G(), ivox_options_.P_threshold);
         writer.write(all_points_dir, *pcl_wait_save_out);
     }
 

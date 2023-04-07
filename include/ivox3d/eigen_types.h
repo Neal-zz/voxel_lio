@@ -59,7 +59,7 @@ inline bool less_vec<3>::operator()(const Eigen::Matrix<int, 3, 1>& v1, const Ei
 /// vec 3 hash
 template <>
 inline size_t hash_vec<3>::operator()(const Eigen::Matrix<int, 3, 1>& v) const {
-    return size_t(((v[0]) * 73856093) ^ ((v[1]) * 471943) ^ ((v[2]) * 83492791)) % 10000000;
+    return size_t(((v[0]) * 73856109325) ^ ((v[1]) * 471945433) ^ ((v[2]) * 83493562791)) % 10000000000;
 }
 
 }  // namespace faster_lio
